@@ -91,6 +91,9 @@ The workflow is visualized and saved as a PNG file for easy understanding of the
 
 ## 🔄 LangGraph Workflow
 
+![firecrawl_langgraph_visualization](https://github.com/user-attachments/assets/0182b399-cb9d-40ef-bf10-02045f92c370)
+
+
 The script uses LangGraph to create a structured workflow with the following nodes:
 
 - `initialize_state`: Sets up the initial state with URL and keyword
