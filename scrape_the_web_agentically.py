@@ -149,18 +149,13 @@ def scrape_manager(state: OverallState) -> OverallState:
         state["urls_to_scrape"] = []
         return state
 
-    batch_size = 10
-    next_index = min(current_index + batch_size, total_urls)
-    urls_to_scrape = urls[current_index:next_index]
+    url_to_scrape = urls[current_index]
+    state["current_url_index"] = current_index + 1
+    state["urls_to_scrape"] = [url_to_scrape]
 
-    state["current_url_index"] = next_index
-    state["urls_to_scrape"] = urls_to_scrape
+    progress_percentage = (current_index / total_urls) * 100 if total_urls > 0 else 0
+    logging.info(f"Processing URL {current_index + 1}/{total_urls}: {url_to_scrape} (Progress: {progress_percentage:.2f}%)")
 
-    progress = (current_index / total_urls) * 100 if total_urls > 0 else 0
-    logging.info(
-        f"Prepared batch: URLs {current_index} to {next_index - 1} "
-        f"(Total: {total_urls}, Progress: {progress:.2f}%)"
-    )
     return state
 
 
@@ -168,10 +163,10 @@ def send_to_scraper(state: OverallState) -> List[Dict[str, Any]]:
     """Prepare individual URL scraping tasks."""
     urls_to_scrape = state.get("urls_to_scrape", [])
     keyword = state.get("keyword", "")
-    
+
     if not urls_to_scrape:
         return []
-    
+
     logging.info(f"Processing {len(urls_to_scrape)} URLs in scraper node.")
 
     return [{"url": url, "keyword": keyword} for url in urls_to_scrape]
@@ -179,32 +174,24 @@ def send_to_scraper(state: OverallState) -> List[Dict[str, Any]]:
 
 def scraper(state: Dict[str, Any], config: Dict[str, Any]) -> Dict[str, Any]:
     """Scrape a single URL for content relevant to the keyword."""
-    url = ""
-    keyword = ""
-
-    if "url" in state:
-        url = state.get("url", "")
+    urls = state.get("urls_to_scrape", [])
+    if urls:
+        url = urls[0]
         keyword = state.get("keyword", "")
-        logging.info(f"Using URL directly from state: {url}")
-    elif "urls_to_scrape" in state and state.get("urls_to_scrape"):
-        urls = state.get("urls_to_scrape", [])
-        if urls:
-            url = urls[0]
-            keyword = state.get("keyword", "")
-            logging.info(f"Using URL from urls_to_scrape: {url}")
-        else:
-            logging.error("Empty urls_to_scrape list")
-            return {
-                "extracted_info": None, 
-                "extracted_from_url": None, 
-                "is_information_found": False
-            }
-    
+        logging.info(f"Using URL from urls_to_scrape: {url}")
+    else:
+        logging.error("Empty urls_to_scrape list")
+        return {
+            "extracted_info": None,
+            "extracted_from_url": None,
+            "is_information_found": False
+        }
+
     if not url:
         logging.error("No URL found in state")
         return {
-            "extracted_info": None, 
-            "extracted_from_url": None, 
+            "extracted_info": None,
+            "extracted_from_url": None,
             "is_information_found": False
         }
 
@@ -212,7 +199,7 @@ def scraper(state: Dict[str, Any], config: Dict[str, Any]) -> Dict[str, Any]:
 
     app = FirecrawlApp(api_url=settings.firecrawl_url)
     logging.info(f"Using Firecrawl server at {settings.firecrawl_url}")
-    
+
     extracted_info: Optional[str] = None
     information_found: bool = False
 
@@ -223,16 +210,25 @@ def scraper(state: Dict[str, Any], config: Dict[str, Any]) -> Dict[str, Any]:
         logging.info(f"Successfully scraped: {url}")
 
         logging.info(f"Processing API response of type: {type(scrape_result)}")
-        
-        if hasattr(scrape_result, 'markdown'):
-            extracted_info = str(scrape_result.markdown) if scrape_result.markdown else ""
-            logging.info("Extracted markdown content")
-        elif hasattr(scrape_result, 'html'):
-            extracted_info = str(scrape_result.html) if scrape_result.html else ""
-            logging.info("Extracted HTML content")
-        elif hasattr(scrape_result, 'text'):
-            extracted_info = str(scrape_result.text) if scrape_result.text else ""
-            logging.info("Extracted text content")
+
+        extracted_metadata = ""
+        extracted_html = ""
+        extracted_markdown = ""
+        extracted_text = ""
+
+        if hasattr(scrape_result, 'metadata') and scrape_result.metadata:
+            extracted_html = str(scrape_result.metadata)
+
+        if hasattr(scrape_result, 'html') and scrape_result.html:
+            extracted_html = str(scrape_result.html)
+
+        if hasattr(scrape_result, 'markdown') and scrape_result.markdown:
+            extracted_markdown = str(scrape_result.markdown)
+
+        if hasattr(scrape_result, 'text') and scrape_result.text:
+            extracted_text = str(scrape_result.text)
+
+        extracted_info = extracted_metadata + extracted_html + extracted_markdown + extracted_text
 
         if extracted_info and keyword.lower() in extracted_info.lower():
             information_found = True
@@ -256,7 +252,7 @@ def evaluate(state: OverallState) -> Dict[str, Any]:
     keyword = state.get("keyword", "unknown keyword")
     extracted_from_url = state.get("extracted_from_url")
     extracted_info = state.get("extracted_info")
-    
+
     if state.get("is_information_found"):
         logging.info(f"Information found for keyword '{keyword}' from URL: {extracted_from_url}")
         return {
@@ -273,20 +269,21 @@ def should_continue_scraping(state: OverallState) -> str:
     """Determine the next step after evaluation."""
     logging.info("Executing node: should_continue_scraping (conditional edge)")
 
-    if state.get("is_information_found"):
-        logging.info("Information found. Ending process.")
-        return "end_process"
-
+    is_information_found = state.get("is_information_found", False)
     current_index = state.get("current_url_index", 0)
     total_urls = state.get("total_urls", 0)
-    
-    if current_index < total_urls:
-        remaining = total_urls - current_index
-        logging.info(f"Information not found, {remaining} more URLs to scrape. Continuing.")
-        return "continue_scraping"
-    else:
-        logging.info("Information not found and no more URLs left. Ending process.")
+
+    if is_information_found:
+        batch_number = current_index // 1
+        logging.info(f"Information found in batch {batch_number}")
         return "end_process"
+
+    if current_index >= total_urls:
+        logging.info(f"All {total_urls} URLs processed without finding information. Ending process.")
+        return "end_process"
+
+    logging.info(f"Information not found in URL {current_index}/{total_urls}. Continuing to next URL.")
+    return "continue_scraping"
 
 def create_graph(settings: Settings) -> Graph:
     """Create the LangGraph workflow for web scraping."""
@@ -344,16 +341,17 @@ def main(url: str = "", keyword: str = "") -> None:
             "url": url,
             "keyword": keyword
         },
-        "settings": settings
+        "settings": settings,
+        "recursion_limit": 2000
     }
 
     logging.info("\nStarting processing...")
-    
+
     try:
         state = {}
         processed_count = 0
         max_batches = 100
-        
+
         for batch in range(max_batches):
             state = graph.invoke(state, config=config)
 
@@ -364,7 +362,7 @@ def main(url: str = "", keyword: str = "") -> None:
             current_index = state.get("current_url_index", 0)
             total_urls = state.get("total_urls", 0)
             processed_count = current_index
-            
+
             if current_index >= total_urls:
                 logging.info("All URLs processed")
                 break
@@ -374,7 +372,7 @@ def main(url: str = "", keyword: str = "") -> None:
 
             if batch > 10 and batch % 10 == 0:
                 logging.info(f"Processed {batch} batches without finding information. Continuing...")
-    
+
     except Exception as e:
         logging.error(f"Error during graph execution: {e}")
         state = None
@@ -397,7 +395,7 @@ def main(url: str = "", keyword: str = "") -> None:
 
 if __name__ == "__main__":
     target_url = "https://python.langchain.com"
-    search_keyword = "LLMs"
+    search_keyword = "How to track token usage for LLMs"
 
     if not target_url or not search_keyword:
         print("Please set the target_url and search_keyword variables.")
