@@ -10,6 +10,14 @@
 This repository contains an intelligent web scraping solution that uses Firecrawl for content extraction and LangGraph for orchestrating the scraping workflow. 
 The system can automatically crawl websites, extract content, and search for specific keywords or information.
 
+
+
+
+https://github.com/user-attachments/assets/e67ce230-d2da-47f8-9ff2-007849dd1d08
+
+
+
+
 ## 🚀 Features
 
 - **Automated Sitemap Extraction**: Automatically discovers all pages on a website
