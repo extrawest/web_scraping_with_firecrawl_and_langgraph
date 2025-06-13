@@ -121,3 +121,5 @@ By default, the script connects to a local Firecrawl server at `http://localhost
 1. Setting the `FIRECRAWL_URL` environment variable
 2. Creating a `.env` file with `FIRECRAWL_URL=your-server-url`
 3. Modifying the `firecrawl_url` parameter in the `Settings` class
+
+Developed by [extrawest](https://extrawest.com/). Software development company
